@@ -1,11 +1,18 @@
-import random, pymysql
+import random, pymysql, os, json
+from utils.mysql_cmd import MYSQL
 
 class ReportGenerator():
     '''
     '''
-    def __init__(self):
-        self.connection = None
-        self._cursor = None
+    def __init__(self, host, port, user, password, db, charset, equip_id):
+    
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.db = db
+        self.charset = charset
+        self.equip_id = equip_id
         self._corpus =  { "0" : "请进行常规维护",
                           "1" : (["萌生初期故障",
                                  "存在早期故障",
@@ -30,19 +37,32 @@ class ReportGenerator():
                                   "建议用户定时进行现场勘查，密切关注设备运行状态，及时维修异常零部件",
                                 ],
                                 ["建议用户重点关注，最好停机检查进行维修"
-                                ])
+                                ])          
                           }
-    
-    def _connection(self, host="127.0.0.1", port=3306, user='root', password='li0123', db='db', charset='utf8'):
+		self.__data = {}
+		
+    def _dbconnection(self):
         '''
+        函数功能：配置连接数据库
         '''
-        self.connection = pymysql.connect(host=host, port=port, user=user, password=password, db=db, charset=charset)
-        self._cursor = self.connection.cursor()
-    
-    def connection_close(self):
-        self._cursor.close()
-        self.connection.close()
+        self.my_conn = MYSQL(host = self.host, port = self.port, user = self.user,
+                             password = self.password, db = self.db, charset = self.charset)
         
+    def get_mpid_info(self, equip):
+        
+        sql = "select mp_id, mp_name, equip_id, line_id, mp_name, equip_name, corresp_parts from cd_monitoring_task where equip_id = '%s'" % (equip)
+        
+        try:
+            iterm_tuple = self.my_conn.inquire_all(sql)   
+        except Exception as e:  
+            print("出现问题1：" + str(e))
+        for iterm_list in iterm_tuple:
+			mpid_info = {'mp_id': iterm_list[0], 'mp_name': iterm_list[1], 'equip_id': iterm_list[2], 'line_id': iterm_list[3], 'mp_name': iterm_list[4], 
+			             'equip_name': iterm_list[5], 'corresp_parts': iterm_list[6]}
+        self.__data[equip] = 
+		
+        return mpid_info
+		
     def get_mpid_info(self, column = ["cm_results_table", "mp_id", "equip_id", "line_id", "mp_name", "equip_name", "corresp_parts"], 
                       table_name = "cd_monitoring_task", equip_id = "EQPID001"):
         '''
@@ -61,18 +81,21 @@ class ReportGenerator():
     def get_latest_alarm(self, mpid_info):
         '''
         '''
-        alarm_col = ["Date", "ind_1_alarm", "ind_2_alarm", "ind_3_alarm", "ind_4_alarm", "ind_5_alarm", "ind_6_alarm"]
-        resu_sql = "select %s from %s where Date=(select max(Date) from %s)"%(",".join(alarm_col), mpid_info[0], mpid_info[0])
+        alarm_col = ["create_time", "alarm"]
+        resu_sql = "select %s from %s where mp_id = \'%s\'"%(",".join(alarm_col), "cm_result", mpid_info[1])
         self._cursor.execute(resu_sql)
-        alarm_data = self._cursor.fetchone()
-        #print(alarm_data)
-        alarm_value = max(alarm_data[1:])
-        return str(alarm_value), alarm_data[0]
+        alarm_data = self._cursor.fetchall()
+        alarm_date = "0000"
+        for i in alarm_data:
+            if str(i[0]) > alarm_date:
+                alarm_date = str(i[0])
+                alarm_value = str(int(i[1]))
+        return alarm_value, alarm_date
         
     def give_suggestion(self, alarm_value, mp=True):
         '''
         '''
-        print(alarm_value=="0")
+        print(alarm_value, alarm_value=="0")
         if mp:
             # 判断测点状态编号
             if alarm_value == "0":
@@ -89,6 +112,9 @@ class ReportGenerator():
                 suggestion = ",".join([random.choice(condition[0]), random.choice(condition[1])])
                 currentstate = "报警"
                 #print(suggestion)
+            elif alarm_value == "3":
+                suggestion = "None"
+                currentstate = "停机"
         else:
             # 判断设备状态编号
             if alarm_value == "0":
@@ -105,6 +131,9 @@ class ReportGenerator():
                 suggestion = random.choice(condition[2])
                 currentstate = "报警"
                 #print(suggestion) 
+            elif alarm_value == "3":
+                suggestion = "None"
+                currentstate = "停机"
         #print(currentstate)
         return currentstate, suggestion
         
@@ -112,45 +141,60 @@ class ReportGenerator():
         '''
         '''
         #mp_currentstate = {"0":"正常", "1":"预警", "2":"报警", "3":"停机"}
-        if alarm_value != "0":
+        if alarm_value in ["1", "2"] and equip_currentstate != "停机":
             mp_result = str(alarm_date) + mpid_info[-2] + mpid_info[-3] + mp_currentstate + "," + mp_suggestion
-        else:
+            equip_result = mpid_info[-2] + equip_currentstate + "," + equip_suggestion
+        elif alarm_value == "0" and equip_currentstate != "停机":
             mp_result = mpid_info[-2] + "的" + mpid_info[-3] + mp_currentstate + "," + mp_suggestion
-            
-        equip_result = mpid_info[-2] + equip_currentstate + "," + equip_suggestion
+            equip_result = mpid_info[-2] + equip_currentstate + "," + equip_suggestion
+        else:#elif alarm_value == "3":
+            mp_result = "None"
+            mp_suggestion = "None"
+            equip_result = "None"
             
         insert_d = tuple([alarm_date] + list(mpid_info[1:]) + [mp_currentstate, mp_suggestion, mp_result, equip_currentstate, equip_suggestion, equip_result])
         #print(insert_d)
         insert_sql = '''insert into report_result(fault_time, mp_id, equip_id, line_id, mp_name, equip_name, corresp_parts, mp_currentstate,\
                     mp_suggestions,mp_result,equip_currentstate, equip_suggestions, equip_result)\
-                    values (str_to_date(\'%s\','%%Y-%%m-%%d %%H:%%i:%%S'), \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\')'''%(insert_d)
-        print(insert_sql)
-        return insert_sql
+                    values (str_to_date(\'%s\','%%Y-%%m-%%d %%H:%%i:%%S'), \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\')'''
+        
+        print(insert_sql%(insert_d))
+        return insert_sql%(insert_d)
     
     def run(self, column = ["cm_results_table", "mp_id", "equip_id", "line_id", "mp_name", "equip_name", "corresp_parts"], 
                       table_name = "cd_monitoring_task", equip_id = "EQPID001"):
         '''
         '''
+        self.data = {}
         mpids_info = self.get_mpid_info(column, table_name, equip_id)
-        alarm_value_list = []
-        mp_suggestions = []
-        mp_currentstates = []
-        alarm_dates = []
-        mp_results = []
         for i in mpids_info:
+            self.data[i[2]] = {}        
+            self.data[i[2]]["alarm_value_list"] = []
+            self.data[i[2]]["mp_suggestions"] = []
+            self.data[i[2]]["mp_currentstates"] = []
+            self.data[i[2]]["alarm_dates"] = []
+            self.data[i[2]]["mpids_info"] = []
+        #equip_currentstates = []
+        #equip_suggestions = [
+        for i in mpids_info:
+            self.data[i[2]]["mpids_info"].append(i)
             alarm_value, alarm_date = self.get_latest_alarm(i)
-            alarm_value_list.append(alarm_value)
-            alarm_dates.append(alarm_date)
+            self.data[i[2]]["alarm_value_list"].append(alarm_value)
+            self.data[i[2]]["alarm_dates"].append(alarm_date)
             
             mp_currentstate, mp_suggestion = self.give_suggestion(alarm_value)
-            mp_suggestions.append(mp_suggestion)
-            mp_currentstates.append(mp_currentstate)
+            self.data[i[2]]["mp_suggestions"].append(mp_suggestion)
+            self.data[i[2]]["mp_currentstates"].append(mp_currentstate)
         #print(alarm_dates)
-        equip_currentstate, equip_suggestion = self.give_suggestion(max(alarm_value_list), mp=False)
-        for i in range(len(alarm_value_list)):
-            insert_sql = self.combiner(alarm_dates[i], mpids_info[i], alarm_value_list[i], mp_currentstates[i],
-                                       mp_suggestions[i], equip_currentstate, equip_suggestion)
-            self._cursor.execute(insert_sql)
+        for i in self.data:
+            self.data[i]["equip_currentstate"], self.data[i]["equip_suggestion"] = self.give_suggestion(max(self.data[i]["alarm_value_list"]), mp=False)
+        self._cursor.execute("TRUNCATE TABLE report_result")
+        for k in self.data:
+            datum = self.data[k]
+            for i in range(len(datum["alarm_value_list"])):
+                insert_sql = self.combiner(datum["alarm_dates"][i], datum["mpids_info"][i], datum["alarm_value_list"][i], 
+                datum["mp_currentstates"][i], datum["mp_suggestions"][i], datum["equip_currentstate"], datum["equip_suggestion"])
+                self._cursor.execute(insert_sql)
             
         self.connection.commit()
         #self.connection_close()
