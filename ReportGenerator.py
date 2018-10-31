@@ -41,6 +41,15 @@ class ReportGenerator():
                           }
 		self.__data = {}
 		
+    def run(self):
+        
+        self._dbconnection()
+        
+        if self.equip_id == 'all':
+            
+        else:
+            mpid_info = self.get_mpid_info(self.equip_id)
+	
     def _dbconnection(self):
         '''
         函数功能：配置连接数据库
@@ -59,7 +68,7 @@ class ReportGenerator():
         for iterm_list in iterm_tuple:
 			mpid_info = {'mp_id': iterm_list[0], 'mp_name': iterm_list[1], 'equip_id': iterm_list[2], 'line_id': iterm_list[3], 'mp_name': iterm_list[4], 
 			             'equip_name': iterm_list[5], 'corresp_parts': iterm_list[6]}
-        self.__data[equip] = 
+        self.__data[equip][iterm_list[0]] = mpid_info
 		
         return mpid_info
 		
